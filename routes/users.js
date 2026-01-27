@@ -1,14 +1,95 @@
-import { db } from '../db/index.js';
+import { db, pool } from '../db/index.js';
 import { users, roles } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 
 export default async function usersRoutes(fastify, options) {
-    // Get all users
+    // Get all users with search and pagination
     fastify.get('/', async (request, reply) => {
         try {
-            // Using raw SQL to join with roles table
-            const result = await db.execute(`
+            const { search, role_id, exclude_role, page = 1, limit = 10 } = request.query;
+
+            // Get logged-in user's role from JWT token
+            const authHeader = request.headers.authorization;
+            let loggedInUserRoleId = null;
+
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                try {
+                    const token = authHeader.substring(7);
+                    const { verifyToken } = await import('../utils/jwt.js');
+                    const decoded = verifyToken(token);
+
+                    if (decoded && decoded.id) {
+                        // Get user's role_id from database
+                        const userResult = await db.select({
+                            role_id: users.role_id
+                        }).from(users).where(eq(users.id, decoded.id)).limit(1);
+
+                        if (userResult.length > 0) {
+                            loggedInUserRoleId = userResult[0].role_id;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error verifying token:', error);
+                }
+            }
+
+            // Calculate offset for pagination
+            const offset = (parseInt(page) - 1) * parseInt(limit);
+
+            // Build WHERE clause for search
+            let whereClause = '';
+            const params = [];
+            let paramIndex = 1;
+
+            if (search) {
+                whereClause = `WHERE (u.name ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex} OR u.username ILIKE $${paramIndex})`;
+                params.push(`%${search}%`);
+                paramIndex++;
+            }
+
+            if (role_id) {
+                if (whereClause) {
+                    whereClause += ` AND u.role_id = $${paramIndex}`;
+                } else {
+                    whereClause = `WHERE u.role_id = $${paramIndex}`;
+                }
+                params.push(parseInt(role_id));
+                paramIndex++;
+            }
+
+            // Filter out users with excluded role
+            if (exclude_role) {
+                if (whereClause) {
+                    whereClause += ` AND TRIM(r.role) != $${paramIndex}`;
+                } else {
+                    whereClause = `WHERE TRIM(r.role) != $${paramIndex}`;
+                }
+                params.push(exclude_role);
+                paramIndex++;
+            }
+
+            // Filter out superadmin users (role_id = 1) if logged-in user is not superadmin
+            if (loggedInUserRoleId !== 1) {
+                if (whereClause) {
+                    whereClause += ` AND u.role_id != 1`;
+                } else {
+                    whereClause = `WHERE u.role_id != 1`;
+                }
+            }
+
+            // Get total count for pagination
+            const countQuery = `
+                SELECT COUNT(*) as total
+                FROM users u
+                LEFT JOIN roles r ON u.role_id = r.id
+                ${whereClause}
+            `;
+            const countResult = await pool.query(countQuery, params);
+            const total = parseInt(countResult.rows[0].total);
+
+            // Get paginated users
+            const query = `
                 SELECT 
                     u.id,
                     u.name,
@@ -22,12 +103,23 @@ export default async function usersRoutes(fastify, options) {
                     u.updated_at
                 FROM users u
                 LEFT JOIN roles r ON u.role_id = r.id
+                ${whereClause}
                 ORDER BY u.id
-            `);
+                LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+            `;
+            params.push(parseInt(limit), offset);
+
+            const result = await pool.query(query, params);
 
             return {
                 success: true,
-                data: result.rows
+                data: result.rows,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total: total,
+                    totalPages: Math.ceil(total / parseInt(limit))
+                }
             };
         } catch (error) {
             console.error('Error fetching users:', error);
@@ -224,6 +316,102 @@ export default async function usersRoutes(fastify, options) {
             return reply.code(500).send({
                 success: false,
                 message: 'Failed to delete user'
+            });
+        }
+    });
+
+    // Change password for authenticated user
+    fastify.put('/change-password', async (request, reply) => {
+        try {
+            const { newPassword } = request.body;
+
+            // Get user from JWT token
+            const authHeader = request.headers.authorization;
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                return reply.code(401).send({
+                    success: false,
+                    message: 'No token provided'
+                });
+            }
+
+            const token = authHeader.substring(7);
+            const { verifyToken } = await import('../utils/jwt.js');
+            const decoded = verifyToken(token);
+
+            if (!decoded || !decoded.id) {
+                return reply.code(401).send({
+                    success: false,
+                    message: 'Invalid token'
+                });
+            }
+
+            // Validate input
+            if (!newPassword) {
+                return reply.code(400).send({
+                    success: false,
+                    message: 'New password is required'
+                });
+            }
+
+            // Validate password strength
+            if (newPassword.length < 6) {
+                return reply.code(400).send({
+                    success: false,
+                    message: 'Password must be at least 6 characters long'
+                });
+            }
+
+            // Check for at least 1 special character
+            const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
+            if (!specialCharRegex.test(newPassword)) {
+                return reply.code(400).send({
+                    success: false,
+                    message: 'Password must contain at least 1 special character'
+                });
+            }
+
+            // Check for at least 1 number OR 1 letter
+            const hasNumber = /\d/.test(newPassword);
+            const hasLetter = /[a-zA-Z]/.test(newPassword);
+            if (!hasNumber && !hasLetter) {
+                return reply.code(400).send({
+                    success: false,
+                    message: 'Password must contain at least 1 number or letter'
+                });
+            }
+
+            // Get user from database
+            const userResult = await db.select({
+                id: users.id
+            }).from(users).where(eq(users.id, decoded.id)).limit(1);
+
+            if (userResult.length === 0) {
+                return reply.code(404).send({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+
+            // Hash new password
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+            // Update password
+            await db.update(users)
+                .set({
+                    password: hashedPassword,
+                    updated_at: new Date()
+                })
+                .where(eq(users.id, decoded.id));
+
+            return {
+                success: true,
+                message: 'Password changed successfully'
+            };
+        } catch (error) {
+            console.error('Error changing password:', error);
+            return reply.code(500).send({
+                success: false,
+                message: 'Failed to change password'
             });
         }
     });

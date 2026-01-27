@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import leadsRoutes from './routes/leads.js';
 import usersRoutes from './routes/users.js';
 import statusesRoutes from './routes/statuses.js';
+import rolesRoutes from './routes/roles.js';
 import commentsRoutes from './routes/comments.js';
 import statusTrackingRoutes from './routes/statusTracking.js';
 import dashboardRoutes from './routes/dashboard.js';
@@ -16,6 +17,9 @@ import ipAccessRoutes from './routes/ipAccess.js';
 
 // Import database
 import { testConnection } from './config/db.js';
+
+// Import middleware
+import { authenticateUser } from './utils/authMiddleware.js';
 
 // Load environment variables
 dotenv.config();
@@ -32,14 +36,19 @@ await fastify.register(cors, {
 
 await fastify.register(formbody);
 
+// Register authenticateUser as a decorator
+fastify.decorate('authenticateUser', authenticateUser);
+
 // Register routes
 await fastify.register(authRoutes, { prefix: '/api/auth' });
 await fastify.register(leadsRoutes, { prefix: '/api/leads' });
 await fastify.register(usersRoutes, { prefix: '/api/users' });
 await fastify.register(statusesRoutes, { prefix: '/api/statuses' });
+await fastify.register(rolesRoutes, { prefix: '/api/roles' });
 await fastify.register(commentsRoutes, { prefix: '/api/leads' });
 await fastify.register(statusTrackingRoutes, { prefix: '/api' });
 await fastify.register(dashboardRoutes, { prefix: '/api/dashboard' });
+// Activities: Read-only (GET endpoints only, no creation)
 await fastify.register(activitiesRoutes, { prefix: '/api/activities' });
 await fastify.register(ipAccessRoutes, { prefix: '/api/ip-access' });
 

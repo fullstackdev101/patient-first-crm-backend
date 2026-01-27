@@ -10,8 +10,7 @@ const __dirname = dirname(__filename);
 // Load .env from backend directory
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
-// Use DATABASE_URL from .env or construct from individual vars
-const connectionString = process.env.DATABASE_URL || `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+const connectionString = process.env.DATABASE_URL;
 
 console.log('🔍 Database connection check:');
 console.log('   DATABASE_URL exists:', !!process.env.DATABASE_URL);
@@ -21,28 +20,31 @@ const client = new Client({
     connectionString: connectionString,
 });
 
-async function seedLeadStatus() {
+async function updateLeadsStatuses() {
     try {
         await client.connect();
-        console.log('Connected to database');
+        console.log('✅ Connected to database');
 
-        // Create lead_status table if it doesn't exist
-        console.log('Creating lead_status table...');
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS lead_status (
-                id SERIAL PRIMARY KEY,
-                status_name VARCHAR(50) NOT NULL UNIQUE,
-                description TEXT,
-                status VARCHAR(20) NOT NULL DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+        // Check which table exists
+        console.log('\n🔍 Checking which status table exists...');
+
+        const tableCheck = await client.query(`
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('lead_status', 'leads_statuses')
         `);
-        console.log('✓ Table created/verified');
 
-        // Insert status values from screenshot
-        console.log('\nInserting status values...');
+        console.log('Found tables:', tableCheck.rows.map(r => r.table_name));
 
+        // Determine which table to use
+        const tableName = tableCheck.rows.find(r => r.table_name === 'leads_statuses')
+            ? 'leads_statuses'
+            : 'lead_status';
+
+        console.log(`\n📝 Using table: ${tableName}`);
+
+        // Define the new statuses
         const statuses = [
             { status_name: 'New', description: 'Initial entry stage for new leads' },
             { status_name: 'Manager Review', description: 'Lead is under management review' },
@@ -53,9 +55,11 @@ async function seedLeadStatus() {
             { status_name: 'Rejected', description: 'Rejected or declined' }
         ];
 
+        console.log('\n🔄 Updating statuses...');
+
         for (const status of statuses) {
             await client.query(
-                `INSERT INTO lead_status (status_name, description, status) 
+                `INSERT INTO ${tableName} (status_name, description, status) 
                  VALUES ($1, $2, 'active')
                  ON CONFLICT (status_name) 
                  DO UPDATE SET description = EXCLUDED.description`,
@@ -65,9 +69,9 @@ async function seedLeadStatus() {
         }
 
         // Display current status records
-        const result = await client.query('SELECT * FROM lead_status ORDER BY id');
-        console.log('\n✅ Lead status table seeded successfully!');
-        console.log('\nCurrent lead_status records:');
+        const result = await client.query(`SELECT * FROM ${tableName} ORDER BY id`);
+        console.log(`\n✅ ${tableName} table updated successfully!`);
+        console.log(`\nCurrent ${tableName} records:`);
         console.table(result.rows);
 
         console.log('\nStatus values:');
@@ -76,21 +80,20 @@ async function seedLeadStatus() {
         });
 
     } catch (error) {
-        console.error('Error seeding lead_status:', error);
+        console.error('❌ Error updating statuses:', error);
         throw error;
     } finally {
         await client.end();
-        console.log('\nDatabase connection closed');
+        console.log('\n🔌 Database connection closed');
     }
 }
 
-// Run the seed script
-seedLeadStatus()
+updateLeadsStatuses()
     .then(() => {
-        console.log('\n✅ Seed completed successfully');
+        console.log('\n✅ Update completed successfully');
         process.exit(0);
     })
     .catch((error) => {
-        console.error('\n❌ Seed failed:', error);
+        console.error('\n❌ Update failed:', error);
         process.exit(1);
     });
