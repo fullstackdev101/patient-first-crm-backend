@@ -89,7 +89,18 @@ export default async function authRoutes(fastify, options) {
 
             // IP Access Control Check - Role-Based Enforcement
             const AGENT_ROLE_ID = 3; // Agent role
+            const QA_REVIEW_ROLE_ID = 5; // QA Review role (was incorrectly set to 8)
             const isAgent = user.role_id === AGENT_ROLE_ID;
+            const isQAReview = user.role_id === QA_REVIEW_ROLE_ID;
+            const requiresIPCheck = isAgent || isQAReview;
+
+            console.log('🔍 IP Check Debug:');
+            console.log('   User role_id:', user.role_id);
+            console.log('   User role:', user.role?.trim());
+            console.log('   isAgent:', isAgent);
+            console.log('   isQAReview:', isQAReview);
+            console.log('   requiresIPCheck:', requiresIPCheck);
+            console.log('   assigned_ip:', user.assigned_ip || 'NOT SET');
 
             // Normalize IPs for comparison (handle IPv4 and IPv6)
             const normalizeIP = (ip) => {
@@ -104,36 +115,38 @@ export default async function authRoutes(fastify, options) {
                 return ip;
             };
 
-            // AGENT ROLE: Must have assigned IP and it must match
-            if (isAgent) {
+            // AGENT & QA REVIEW ROLES: Must have assigned IP and it must match
+            if (requiresIPCheck) {
+                const roleName = isAgent ? 'Agent' : 'QA Review';
+
                 if (!user.assigned_ip) {
-                    console.log('❌ LOGIN FAILED - Agent without assigned IP');
+                    console.log(`❌ LOGIN FAILED - ${roleName} without assigned IP`);
                     console.log('👤 Username:', username);
                     console.log('🌐 Login IP:', clientIP);
-                    console.log('⚠️  Reason: Agent accounts require an assigned IP address');
+                    console.log(`⚠️  Reason: ${roleName} accounts require an assigned IP address`);
                     console.log('═══════════════════════════════════════════════════════');
                     return reply.code(403).send({
                         success: false,
-                        message: 'Agent accounts require an assigned IP address. Please contact your administrator.',
+                        message: `${roleName} accounts require an assigned IP address. Please contact your administrator.`,
                         errorType: 'IP_NOT_ASSIGNED'
                     });
                 }
 
-                // Agent has assigned IP - validate it matches
+                // Role has assigned IP - validate it matches
                 const normalizedClientIP = normalizeIP(clientIP);
                 const normalizedAssignedIP = normalizeIP(user.assigned_ip);
 
-                console.log('🔍 Agent IP Validation - Client:', normalizedClientIP, 'Assigned:', normalizedAssignedIP);
+                console.log(`🔍 ${roleName} IP Validation - Client:`, normalizedClientIP, 'Assigned:', normalizedAssignedIP);
 
                 if (normalizedClientIP !== normalizedAssignedIP) {
-                    console.log('❌ LOGIN FAILED - Agent IP Mismatch');
+                    console.log(`❌ LOGIN FAILED - ${roleName} IP Mismatch`);
                     console.log('👤 Username:', username);
                     console.log('🌐 Client IP:', normalizedClientIP);
                     console.log('🔒 Assigned IP:', normalizedAssignedIP);
                     console.log('═══════════════════════════════════════════════════════');
                     return reply.code(403).send({
                         success: false,
-                        message: 'Access denied: IP address not authorized for this agent account',
+                        message: `Access denied: IP address not authorized for this ${roleName} account`,
                         errorType: 'IP_RESTRICTED',
                         details: {
                             clientIP: normalizedClientIP,
@@ -142,7 +155,7 @@ export default async function authRoutes(fastify, options) {
                     });
                 }
 
-                console.log('✅ Agent IP Validated Successfully');
+                console.log(`✅ ${roleName} IP Validated Successfully`);
             }
             // NON-AGENT ROLES: Only check IP if assigned_ip exists
             else if (user.assigned_ip) {
@@ -232,15 +245,17 @@ export default async function authRoutes(fastify, options) {
                 });
             }
 
-            // Fetch user from database using Drizzle
+            // Fetch user from database with role using Drizzle
             const userResult = await db.select({
                 id: users.id,
                 name: users.name,
                 username: users.username,
                 email: users.email,
                 role_id: users.role_id,
+                role: sql`TRIM(${roles.role})`.as('role'),
                 status: users.status,
             }).from(users)
+                .leftJoin(roles, eq(users.role_id, roles.id))
                 .where(eq(users.id, decoded.id))
                 .limit(1);
 
@@ -271,6 +286,7 @@ export default async function authRoutes(fastify, options) {
                         username: user.username,
                         email: user.email,
                         role_id: user.role_id,
+                        role: user.role, // Include role name
                         status: user.status
                     }
                 }

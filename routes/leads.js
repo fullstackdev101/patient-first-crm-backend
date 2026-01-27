@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { leads, leadsStatusTracking, leadsAssignedTracking, leadsStatuses, users, roles } from '../db/schema.js';
-import { eq, like, or, desc, count, sql } from 'drizzle-orm';
+import { eq, like, or, and, desc, count, sql } from 'drizzle-orm';
 import { logActivity, ACTIVITY_TYPES } from '../utils/activityLogger.js';
 import { authenticateUser } from '../utils/authMiddleware.js';
 
@@ -11,6 +11,17 @@ export default async function leadsRoutes(fastify, options) {
     fastify.get('/', async (request, reply) => {
         try {
             const { status, search, page = 1, limit = 5 } = request.query;
+
+            // Debug: Log all query parameters
+            console.log('🔍 GET /leads - Query params:', {
+                status,
+                search,
+                assigned_to: request.query.assigned_to,
+                start_date: request.query.start_date,
+                end_date: request.query.end_date,
+                page,
+                limit
+            });
 
             // Get authenticated user info
             const currentUser = request.user;
@@ -33,40 +44,102 @@ export default async function leadsRoutes(fastify, options) {
                 assigned_to: users.username, // Get agent name instead of ID
                 assigned_to_id: leads.assigned_to, // Keep ID for reference
                 assigned_to_role: sql`${roles.role}`.as('assigned_to_role'), // Get role from roles table
+                created_by_id: leads.created_by,
+                created_by_name: sql`creator.name`.as('created_by_name'), // Get creator name
                 created_at: leads.created_at,
                 updated_at: leads.updated_at
             })
                 .from(leads)
                 .leftJoin(leadsStatuses, eq(leads.status, leadsStatuses.id))
                 .leftJoin(users, eq(leads.assigned_to, users.id))
-                .leftJoin(roles, eq(users.role_id, roles.id));
+                .leftJoin(roles, eq(users.role_id, roles.id))
+                .leftJoin(sql`users AS creator`, sql`${leads.created_by} = creator.id`); // Join for creator
 
             let countQuery = db.select({ count: count() }).from(leads);
 
-            // Role-based filtering: Agents can only see their assigned leads
+            // Role-based filtering
             if (userRole === 'Agent' && currentUser?.id) {
+                // Agents see only leads they created
+                query = query.where(eq(leads.created_by, currentUser.id));
+                countQuery = countQuery.where(eq(leads.created_by, currentUser.id));
+            } else if (userRole === 'License Agent' && currentUser?.id) {
+                // License Agents see only leads assigned to them
                 query = query.where(eq(leads.assigned_to, currentUser.id));
                 countQuery = countQuery.where(eq(leads.assigned_to, currentUser.id));
             }
+            // All other roles see all leads (no filter applied)
 
-            // Apply status filter if provided
+            // Collect all filter conditions
+            const conditions = [];
+            const countConditions = [];
+
+            // Apply status filter if provided (now using status ID)
             if (status && status !== 'All Statuses' && status !== 'All') {
-                query = query.where(eq(leadsStatuses.status_name, status));
-                countQuery = countQuery
-                    .leftJoin(leadsStatuses, eq(leads.status, leadsStatuses.id))
-                    .where(eq(leadsStatuses.status_name, status));
+                const statusId = parseInt(status);
+                if (!isNaN(statusId)) {
+                    conditions.push(eq(leads.status, statusId));
+                    countConditions.push(eq(leads.status, statusId));
+                    console.log('✅ Applying status filter with ID:', statusId);
+                }
             }
 
-            // Apply search filter if provided
+            // Apply search filter if provided (now includes lead ID)
             if (search) {
                 const searchCondition = or(
                     like(leads.first_name, `%${search}%`),
                     like(leads.last_name, `%${search}%`),
                     like(leads.email, `%${search}%`),
-                    like(leads.phone, `%${search}%`)
+                    like(leads.phone, `%${search}%`),
+                    sql`CAST(${leads.id} AS TEXT) LIKE ${`%${search}%`}` // Search by lead ID
                 );
-                query = query.where(searchCondition);
-                countQuery = countQuery.where(searchCondition);
+                conditions.push(searchCondition);
+                countConditions.push(searchCondition);
+                console.log('✅ Applying search filter:', search);
+            }
+
+            // Apply assigned_to filter if provided
+            if (request.query.assigned_to && request.query.assigned_to !== 'All') {
+                const assignedCondition = eq(leads.assigned_to, parseInt(request.query.assigned_to));
+                conditions.push(assignedCondition);
+                countConditions.push(assignedCondition);
+                console.log('✅ Applying assigned_to filter:', request.query.assigned_to);
+            }
+
+            // Apply date filters if provided
+            if (request.query.start_date || request.query.end_date) {
+                const startDate = request.query.start_date;
+                const endDate = request.query.end_date;
+
+                console.log('📅 Date filter received:', { startDate, endDate });
+
+                if (startDate && endDate) {
+                    // Date range filter - use sql.raw for proper date casting
+                    const dateCondition = sql`CAST(${leads.created_at} AS DATE) >= CAST(${startDate} AS DATE) AND CAST(${leads.created_at} AS DATE) <= CAST(${endDate} AS DATE)`;
+                    conditions.push(dateCondition);
+                    countConditions.push(dateCondition);
+                    console.log('📅 Applying date range filter:', startDate, 'to', endDate);
+                } else if (startDate) {
+                    // Only start date (from this date onwards)
+                    const dateCondition = sql`CAST(${leads.created_at} AS DATE) >= CAST(${startDate} AS DATE)`;
+                    conditions.push(dateCondition);
+                    countConditions.push(dateCondition);
+                    console.log('📅 Applying start date filter:', startDate);
+                } else if (endDate) {
+                    // Only end date (up to this date)
+                    const dateCondition = sql`CAST(${leads.created_at} AS DATE) <= CAST(${endDate} AS DATE)`;
+                    conditions.push(dateCondition);
+                    countConditions.push(dateCondition);
+                    console.log('📅 Applying end date filter:', endDate);
+                }
+            }
+
+            // Apply all conditions together with AND
+            if (conditions.length > 0) {
+                query = query.where(and(...conditions));
+                console.log(`✅ Applied ${conditions.length} filter condition(s) with AND`);
+            }
+            if (countConditions.length > 0) {
+                countQuery = countQuery.where(and(...countConditions));
             }
 
             // Get total count
@@ -126,31 +199,101 @@ export default async function leadsRoutes(fastify, options) {
                 });
             }
 
-            const lead = await db.select()
+            const leadResult = await db.select({
+                // Lead fields
+                id: leads.id,
+                first_name: leads.first_name,
+                last_name: leads.last_name,
+                middle_initial: leads.middle_initial,
+                date_of_birth: leads.date_of_birth,
+                phone: leads.phone,
+                email: leads.email,
+                address: leads.address,
+                state_of_birth: leads.state_of_birth,
+                ssn: leads.ssn,
+                height: leads.height,
+                weight: leads.weight,
+                insurance_provider: leads.insurance_provider,
+                policy_number: leads.policy_number,
+                medical_notes: leads.medical_notes,
+                doctor_name: leads.doctor_name,
+                doctor_phone: leads.doctor_phone,
+                doctor_address: leads.doctor_address,
+                beneficiary_details: leads.beneficiary_details,
+                plan_details: leads.plan_details,
+                bank_name: leads.bank_name,
+                account_name: leads.account_name,
+                account_number: leads.account_number,
+                routing_number: leads.routing_number,
+                account_type: leads.account_type,
+                banking_comments: leads.banking_comments,
+                status: leads.status,
+                assigned_to: leads.assigned_to,
+                created_by: leads.created_by,
+                created_at: leads.created_at,
+                updated_at: leads.updated_at,
+                // Health questionnaire fields
+                hospitalized_nursing_oxygen_cancer_assistance: leads.hospitalized_nursing_oxygen_cancer_assistance,
+                organ_transplant_terminal_condition: leads.organ_transplant_terminal_condition,
+                aids_hiv_immune_deficiency: leads.aids_hiv_immune_deficiency,
+                diabetes_complications_insulin: leads.diabetes_complications_insulin,
+                kidney_disease_multiple_cancers: leads.kidney_disease_multiple_cancers,
+                pending_tests_surgery_hospitalization: leads.pending_tests_surgery_hospitalization,
+                angina_stroke_lupus_copd_hepatitis: leads.angina_stroke_lupus_copd_hepatitis,
+                heart_attack_aneurysm_surgery: leads.heart_attack_aneurysm_surgery,
+                cancer_treatment_2years: leads.cancer_treatment_2years,
+                substance_abuse_treatment: leads.substance_abuse_treatment,
+                cardiovascular_events_3years: leads.cardiovascular_events_3years,
+                cancer_respiratory_liver_3years: leads.cancer_respiratory_liver_3years,
+                neurological_conditions_3years: leads.neurological_conditions_3years,
+                health_comments: leads.health_comments,
+                covid_question: leads.covid_question,
+            })
                 .from(leads)
                 .where(eq(leads.id, leadId))
                 .limit(1);
 
-            if (lead.length === 0) {
+            if (leadResult.length === 0) {
                 return reply.code(404).send({
                     success: false,
                     message: 'Lead not found'
                 });
             }
 
-            // Role-based access: Agents can only view their assigned leads
+            // Fetch assigned user name separately if assigned_to exists
+            let assigned_user_name = null;
+            if (leadResult[0].assigned_to) {
+                const userResult = await db.select({
+                    username: users.username
+                })
+                    .from(users)
+                    .where(eq(users.id, leadResult[0].assigned_to))
+                    .limit(1);
+
+                if (userResult.length > 0) {
+                    assigned_user_name = userResult[0].username;
+                }
+            }
+
+            // Add assigned_user_name to the result
+            const leadData = {
+                ...leadResult[0],
+                assigned_user_name
+            };
+
+            // Role-based access: Agents can only view leads they created
             const currentUser = request.user;
             const userRole = currentUser?.role?.trim();
-            if (userRole === 'Agent' && lead[0].assigned_to !== currentUser?.id) {
+            if (userRole === 'Agent' && leadData.created_by !== currentUser?.id) {
                 return reply.code(403).send({
                     success: false,
-                    message: 'Access denied: You can only view leads assigned to you'
+                    message: 'Access denied: You can only view leads you created'
                 });
             }
 
             return {
                 success: true,
-                data: lead[0]
+                data: leadData
             };
         } catch (error) {
             console.error('Error fetching lead:', error);
@@ -213,7 +356,8 @@ export default async function leadsRoutes(fastify, options) {
                 account_type: leadData.account_type,
                 banking_comments: leadData.banking_comments || null,
                 status: leadData.status ? parseInt(leadData.status) : 6, // Default to 'New' (id: 6)
-                assigned_to: leadData.assigned_to ? parseInt(leadData.assigned_to) : null
+                assigned_to: leadData.assigned_to ? parseInt(leadData.assigned_to) : null,
+                created_by: request.user?.id || null // Set created_by from authenticated user
             };
 
             console.log(dbLead);
@@ -224,7 +368,7 @@ export default async function leadsRoutes(fastify, options) {
                 .returning();
 
             // Log activity
-            const userId = leadData.created_by || 1; // Default to user 1 if not provided
+            const userId = request.user?.id || 1; // Use authenticated user ID
             await logActivity({
                 userId,
                 activityType: ACTIVITY_TYPES.LEAD_CREATED,
@@ -277,11 +421,11 @@ export default async function leadsRoutes(fastify, options) {
             const userRole = currentUser?.role?.trim();
 
             if (userRole === 'Agent') {
-                // Agents can only edit leads assigned to them
-                if (existingLead[0].assigned_to !== currentUser?.id) {
+                // Agents can only edit leads they created
+                if (existingLead[0].created_by !== currentUser?.id) {
                     return reply.code(403).send({
                         success: false,
-                        message: 'Access denied: You can only edit leads assigned to you'
+                        message: 'Access denied: You can only edit leads you created'
                     });
                 }
 
@@ -319,15 +463,16 @@ export default async function leadsRoutes(fastify, options) {
                 .returning();
 
             // Track status change if status was updated
-            if (statusChanged && updateData.user_id) {
+            if (statusChanged && newStatus) {
                 try {
+                    const userId = request.user?.id || 1; // Use authenticated user ID
                     await db.insert(leadsStatusTracking).values({
                         lead_id: parseInt(id),
-                        user_id: parseInt(updateData.user_id),
+                        user_id: userId,
                         old_status: oldStatus,
                         new_status: newStatus,
                     });
-                    console.log(`Status tracking logged: ${oldStatus} -> ${newStatus}`);
+                    console.log(`✅ Status tracking logged: ${oldStatus} -> ${newStatus} by user ${userId}`);
                 } catch (trackingError) {
                     console.error('Error logging status tracking:', trackingError);
                     // Don't fail the update if tracking fails
@@ -335,15 +480,16 @@ export default async function leadsRoutes(fastify, options) {
             }
 
             // Track assignment change if assigned_to was updated
-            if (assignmentChanged && updateData.user_id && newAssignedTo) {
+            if (assignmentChanged && newAssignedTo) {
                 try {
+                    const userId = request.user?.id || 1; // Use authenticated user ID
                     await db.insert(leadsAssignedTracking).values({
                         lead_id: parseInt(id),
-                        assigned_by_user_id: parseInt(updateData.user_id),
+                        assigned_by_user_id: userId,
                         assigned_to_user_id: parseInt(newAssignedTo),
                         old_assigned_to: oldAssignedTo ? parseInt(oldAssignedTo) : null,
                     });
-                    console.log(`Assignment tracking logged: ${oldAssignedTo} -> ${newAssignedTo}`);
+                    console.log(`✅ Assignment tracking logged: ${oldAssignedTo} -> ${newAssignedTo} by user ${userId}`);
                 } catch (trackingError) {
                     console.error('Error logging assignment tracking:', trackingError);
                     // Don't fail the update if tracking fails

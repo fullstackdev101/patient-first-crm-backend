@@ -127,6 +127,7 @@ export const leads = pgTable('leads', {
     cardiovascular_events_3years: boolean('cardiovascular_events_3years').notNull(),
     cancer_respiratory_liver_3years: boolean('cancer_respiratory_liver_3years').notNull(),
     neurological_conditions_3years: boolean('neurological_conditions_3years').notNull(),
+    health_comments: text('health_comments'),
     covid_question: boolean('covid_question').notNull(),
 
     // Banking Information
@@ -140,6 +141,7 @@ export const leads = pgTable('leads', {
     // Metadata
     status: integer('status').notNull().references(() => leadsStatuses.id),
     assigned_to: integer('assigned_to').references(() => users.id),
+    created_by: integer('created_by').references(() => users.id),
     created_at: timestamp('created_at').defaultNow(),
     updated_at: timestamp('updated_at').defaultNow(),
 });
