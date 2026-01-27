@@ -30,7 +30,7 @@ const fastify = Fastify({
 
 // Register plugins
 await fastify.register(cors, {
-    origin: 'http://localhost:3000', // Frontend URL
+    origin: 'http://localhost:3000,https://patient-first-crm-frontend.vercel.app', // Frontend URL
     credentials: true
 });
 
