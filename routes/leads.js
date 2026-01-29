@@ -25,10 +25,11 @@ export default async function leadsRoutes(fastify, options) {
 
             // Get authenticated user info
             const currentUser = request.user;
-            const userRole = currentUser?.role?.trim();
+            const userRoleId = currentUser?.role_id;
 
-            // Build query with joins
+            // Build query with joins - SELECT ALL FIELDS
             let query = db.select({
+                // Basic Information
                 id: leads.id,
                 first_name: leads.first_name,
                 last_name: leads.last_name,
@@ -39,6 +40,49 @@ export default async function leadsRoutes(fastify, options) {
                 address: leads.address,
                 state_of_birth: leads.state_of_birth,
                 ssn: leads.ssn,
+
+                // Medical Information
+                height: leads.height,
+                weight: leads.weight,
+                insurance_provider: leads.insurance_provider,
+                policy_number: leads.policy_number,
+                medical_notes: leads.medical_notes,
+
+                // Doctor Information
+                doctor_name: leads.doctor_name,
+                doctor_phone: leads.doctor_phone,
+                doctor_address: leads.doctor_address,
+
+                // Beneficiary & Plan Information
+                beneficiary_details: leads.beneficiary_details,
+                plan_details: leads.plan_details,
+
+                // Health Questionnaire
+                hospitalized_nursing_oxygen_cancer_assistance: leads.hospitalized_nursing_oxygen_cancer_assistance,
+                organ_transplant_terminal_condition: leads.organ_transplant_terminal_condition,
+                aids_hiv_immune_deficiency: leads.aids_hiv_immune_deficiency,
+                diabetes_complications_insulin: leads.diabetes_complications_insulin,
+                kidney_disease_multiple_cancers: leads.kidney_disease_multiple_cancers,
+                pending_tests_surgery_hospitalization: leads.pending_tests_surgery_hospitalization,
+                angina_stroke_lupus_copd_hepatitis: leads.angina_stroke_lupus_copd_hepatitis,
+                heart_attack_aneurysm_surgery: leads.heart_attack_aneurysm_surgery,
+                cancer_treatment_2years: leads.cancer_treatment_2years,
+                substance_abuse_treatment: leads.substance_abuse_treatment,
+                cardiovascular_events_3years: leads.cardiovascular_events_3years,
+                cancer_respiratory_liver_3years: leads.cancer_respiratory_liver_3years,
+                neurological_conditions_3years: leads.neurological_conditions_3years,
+                covid_question: leads.covid_question,
+                health_comments: leads.health_comments,
+
+                // Banking Information
+                bank_name: leads.bank_name,
+                account_name: leads.account_name,
+                account_number: leads.account_number,
+                routing_number: leads.routing_number,
+                account_type: leads.account_type,
+                banking_comments: leads.banking_comments,
+
+                // Metadata
                 status: leadsStatuses.status_name, // Get status name instead of ID
                 status_id: leads.status, // Keep ID for filtering
                 assigned_to: users.username, // Get agent name instead of ID
@@ -58,23 +102,29 @@ export default async function leadsRoutes(fastify, options) {
             let countQuery = db.select({ count: count() }).from(leads);
 
             // Role-based filtering
-            if (userRole === 'Agent' && currentUser?.id) {
-                // Agents see only leads they created
+            if (userRoleId === 3 && currentUser?.id) {
+                // Agents (role_id: 3) see only leads they created
                 query = query.where(eq(leads.created_by, currentUser.id));
                 countQuery = countQuery.where(eq(leads.created_by, currentUser.id));
-            } else if (userRole === 'License Agent' && currentUser?.id) {
-                // License Agents see only leads assigned to them
-                query = query.where(eq(leads.assigned_to, currentUser.id));
-                countQuery = countQuery.where(eq(leads.assigned_to, currentUser.id));
             }
-            // All other roles see all leads (no filter applied)
+            // All other roles see all leads (no filter applied at this stage)
 
             // Collect all filter conditions
             const conditions = [];
             const countConditions = [];
 
+            // License Agent role-based status filter (must be in conditions array to combine with other filters)
+            if (userRoleId === 4 && currentUser?.id) {
+                // License Agents (role_id: 4) see all leads with status 8 (License Agent), regardless of assignment
+                const licenseAgentStatusCondition = eq(leads.status, 8);
+                conditions.push(licenseAgentStatusCondition);
+                countConditions.push(licenseAgentStatusCondition);
+                console.log('✅ License Agent filter applied: status = 8 (all License Agent leads)');
+            }
+
             // Apply status filter if provided (now using status ID)
-            if (status && status !== 'All Statuses' && status !== 'All') {
+            // Skip this for License Agents since they can only see status 8
+            if (status && status !== 'All Statuses' && status !== 'All' && userRoleId !== 4) {
                 const statusId = parseInt(status);
                 if (!isNaN(statusId)) {
                     conditions.push(eq(leads.status, statusId));
@@ -283,8 +333,8 @@ export default async function leadsRoutes(fastify, options) {
 
             // Role-based access: Agents can only view leads they created
             const currentUser = request.user;
-            const userRole = currentUser?.role?.trim();
-            if (userRole === 'Agent' && leadData.created_by !== currentUser?.id) {
+            const userRoleId = currentUser?.role_id;
+            if (userRoleId === 3 && leadData.created_by !== currentUser?.id) {
                 return reply.code(403).send({
                     success: false,
                     message: 'Access denied: You can only view leads you created'
@@ -418,9 +468,9 @@ export default async function leadsRoutes(fastify, options) {
 
             // Role-based access control for Agents
             const currentUser = request.user;
-            const userRole = currentUser?.role?.trim();
+            const userRoleId = currentUser?.role_id;
 
-            if (userRole === 'Agent') {
+            if (userRoleId === 3) {
                 // Agents can only edit leads they created
                 if (existingLead[0].created_by !== currentUser?.id) {
                     return reply.code(403).send({
@@ -444,15 +494,52 @@ export default async function leadsRoutes(fastify, options) {
                 }
             }
 
-            // Check if status changed
+            // Store old status for tracking (check if changed AFTER auto-assignment)
             const oldStatus = existingLead[0].status;
-            const newStatus = updateData.status;
-            const statusChanged = oldStatus !== newStatus;
 
             // Check if assignment changed
             const oldAssignedTo = existingLead[0].assigned_to;
             const newAssignedTo = updateData.assigned_to;
             const assignmentChanged = oldAssignedTo !== newAssignedTo;
+
+            // AUTO-ASSIGN STATUS BASED ON ASSIGNED AGENT'S ROLE
+            if (assignmentChanged) {
+                if (newAssignedTo) {
+                    // Fetch the assigned user's role_id
+                    const assignedUserResult = await db.select({
+                        role_id: users.role_id
+                    })
+                        .from(users)
+                        .where(eq(users.id, parseInt(newAssignedTo)))
+                        .limit(1);
+
+                    if (assignedUserResult.length > 0) {
+                        const assignedUserRoleId = assignedUserResult[0].role_id;
+
+                        // Role-to-Status mapping
+                        const roleStatusMap = {
+                            2: 2,  // Admin → Pending
+                            5: 3,  // Manager → Approved
+                            6: 4,  // QA Review → Rejected
+                            4: 8   // License Agent → License Agent
+                        };
+
+                        // Auto-assign status based on role_id
+                        if (roleStatusMap[assignedUserRoleId]) {
+                            updateData.status = roleStatusMap[assignedUserRoleId];
+                            console.log(`✅ Auto-assigned status ${updateData.status} based on role_id ${assignedUserRoleId}`);
+                        }
+                    }
+                } else {
+                    // If unassigned, keep status at 1 (New) - only if current status is not manually set
+                    // We don't force it to 1, we just don't change it
+                    console.log('ℹ️  Lead unassigned, status remains unchanged');
+                }
+            }
+
+            // NOW check if status changed (AFTER auto-assignment logic)
+            const newStatus = updateData.status;
+            const statusChanged = oldStatus !== newStatus;
 
             // Update lead
             updateData.updated_at = new Date();

@@ -9,17 +9,17 @@ export default async function dashboardRoutes(fastify, options) {
     }, async (request, reply) => {
         try {
             const currentUser = request.user;
-            const userRole = currentUser?.role?.trim();
+            const userRoleId = currentUser?.role_id;
 
             console.log('🔍 Dashboard Stats - Current User:', currentUser);
-            console.log('🔍 Dashboard Stats - User Role:', userRole);
+            console.log('🔍 Dashboard Stats - User Role ID:', userRoleId);
             console.log('🔍 Dashboard Stats - User ID:', currentUser?.id);
 
             // Base query conditions
             let whereCondition = null;
 
-            // If user is an Agent, filter by created_by
-            if (userRole === 'Agent' && currentUser?.id) {
+            // If user is an Agent (role_id: 3), filter by created_by
+            if (userRoleId === 3 && currentUser?.id) {
                 whereCondition = eq(leads.created_by, currentUser.id);
                 console.log('✅ Dashboard Stats - Agent detected, filtering by created_by:', currentUser.id);
             } else {
@@ -87,7 +87,7 @@ export default async function dashboardRoutes(fastify, options) {
                 WHERE status = ${statusMap['Approved'] || 4}
                     AND created_at >= ${twelveMonthsAgo.toISOString()}`;
 
-            if (whereCondition && userRole === 'Agent') {
+            if (whereCondition && userRoleId === 3) {
                 monthlyQuery = sql`${monthlyQuery} AND created_by = ${currentUser.id}`;
             }
 

@@ -89,15 +89,21 @@ export default async function authRoutes(fastify, options) {
 
             // IP Access Control Check - Role-Based Enforcement
             const AGENT_ROLE_ID = 3; // Agent role
+            const MANAGER_ROLE_ID = 2; // Manager role
+            const LICENSE_AGENT_ROLE_ID = 4; // License Agent role
             const QA_REVIEW_ROLE_ID = 5; // QA Review role (was incorrectly set to 8)
             const isAgent = user.role_id === AGENT_ROLE_ID;
+            const isManager = user.role_id === MANAGER_ROLE_ID;
+            const isLicenseAgent = user.role_id === LICENSE_AGENT_ROLE_ID;
             const isQAReview = user.role_id === QA_REVIEW_ROLE_ID;
-            const requiresIPCheck = isAgent || isQAReview;
+            const requiresIPCheck = isAgent || isManager || isLicenseAgent || isQAReview;
 
             console.log('🔍 IP Check Debug:');
             console.log('   User role_id:', user.role_id);
             console.log('   User role:', user.role?.trim());
             console.log('   isAgent:', isAgent);
+            console.log('   isManager:', isManager);
+            console.log('   isLicenseAgent:', isLicenseAgent);
             console.log('   isQAReview:', isQAReview);
             console.log('   requiresIPCheck:', requiresIPCheck);
             console.log('   assigned_ip:', user.assigned_ip || 'NOT SET');
@@ -115,9 +121,9 @@ export default async function authRoutes(fastify, options) {
                 return ip;
             };
 
-            // AGENT & QA REVIEW ROLES: Must have assigned IP and it must match
+            // AGENT, MANAGER, LICENSE AGENT & QA REVIEW ROLES: Must have assigned IP and it must match
             if (requiresIPCheck) {
-                const roleName = isAgent ? 'Agent' : 'QA Review';
+                const roleName = isAgent ? 'Agent' : (isManager ? 'Manager' : (isLicenseAgent ? 'License Agent' : 'QA Review'));
 
                 if (!user.assigned_ip) {
                     console.log(`❌ LOGIN FAILED - ${roleName} without assigned IP`);
