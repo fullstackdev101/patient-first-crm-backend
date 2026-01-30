@@ -277,6 +277,9 @@ export default async function leadsRoutes(fastify, options) {
                 routing_number: leads.routing_number,
                 account_type: leads.account_type,
                 banking_comments: leads.banking_comments,
+                // Draft Fields
+                initial_draft: leads.initial_draft,
+                future_draft: leads.future_draft,
                 status: leads.status,
                 assigned_to: leads.assigned_to,
                 created_by: leads.created_by,
@@ -405,6 +408,9 @@ export default async function leadsRoutes(fastify, options) {
                 routing_number: leadData.routing_number,
                 account_type: leadData.account_type,
                 banking_comments: leadData.banking_comments || null,
+                // Draft Fields
+                initial_draft: leadData.initial_draft || null,
+                future_draft: leadData.future_draft || null,
                 status: leadData.status ? parseInt(leadData.status) : 6, // Default to 'New' (id: 6)
                 assigned_to: leadData.assigned_to ? parseInt(leadData.assigned_to) : null,
                 created_by: request.user?.id || null // Set created_by from authenticated user

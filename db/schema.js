@@ -138,6 +138,10 @@ export const leads = pgTable('leads', {
     account_type: varchar('account_type', { length: 50 }).notNull(),
     banking_comments: text('banking_comments'),
 
+    // Draft Fields
+    initial_draft: text('initial_draft'),
+    future_draft: text('future_draft'),
+
     // Metadata
     status: integer('status').notNull().references(() => leadsStatuses.id),
     assigned_to: integer('assigned_to').references(() => users.id),
