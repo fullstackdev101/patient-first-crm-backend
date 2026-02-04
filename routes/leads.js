@@ -3,6 +3,7 @@ import { leads, leadsStatusTracking, leadsAssignedTracking, leadsStatuses, users
 import { eq, like, or, and, desc, count, sql } from 'drizzle-orm';
 import { logActivity, ACTIVITY_TYPES } from '../utils/activityLogger.js';
 import { authenticateUser } from '../utils/authMiddleware.js';
+import { getNowCentral } from '../utils/datetime.js';
 
 export default async function leadsRoutes(fastify, options) {
     // Add authentication middleware to all routes
@@ -56,6 +57,7 @@ export default async function leadsRoutes(fastify, options) {
                 // Beneficiary & Plan Information
                 beneficiary_details: leads.beneficiary_details,
                 plan_details: leads.plan_details,
+                quote_type: leads.quote_type,
 
                 // Health Questionnaire
                 hospitalized_nursing_oxygen_cancer_assistance: leads.hospitalized_nursing_oxygen_cancer_assistance,
@@ -81,6 +83,10 @@ export default async function leadsRoutes(fastify, options) {
                 routing_number: leads.routing_number,
                 account_type: leads.account_type,
                 banking_comments: leads.banking_comments,
+
+                // Draft Fields
+                initial_draft: leads.initial_draft,
+                future_draft: leads.future_draft,
 
                 // Metadata
                 status: leadsStatuses.status_name, // Get status name instead of ID
@@ -283,6 +289,7 @@ export default async function leadsRoutes(fastify, options) {
                 doctor_address: leads.doctor_address,
                 beneficiary_details: leads.beneficiary_details,
                 plan_details: leads.plan_details,
+                quote_type: leads.quote_type,
                 bank_name: leads.bank_name,
                 account_name: leads.account_name,
                 account_number: leads.account_number,
@@ -403,6 +410,7 @@ export default async function leadsRoutes(fastify, options) {
                 doctor_address: leadData.doctor_address || null,
                 beneficiary_details: leadData.beneficiary_details,
                 plan_details: leadData.plan_details,
+                quote_type: leadData.quote_type || null,
 
                 // Handle health questionnaire - accept both boolean and string values
                 // If already boolean, use it; if string 'yes'/'no', convert; otherwise default to false
@@ -567,8 +575,8 @@ export default async function leadsRoutes(fastify, options) {
             const newStatus = updateData.status;
             const statusChanged = oldStatus !== newStatus;
 
-            // Update lead
-            updateData.updated_at = new Date();
+            // Update lead with Central Time timestamp
+            updateData.updated_at = getNowCentral();
 
             const updatedLead = await db.update(leads)
                 .set(updateData)

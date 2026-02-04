@@ -2,6 +2,7 @@ import { db, pool } from '../db/index.js';
 import { users, roles } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
+import { getNowCentral } from '../utils/datetime.js';
 
 export default async function usersRoutes(fastify, options) {
     // Get all users with search and pagination
@@ -260,7 +261,8 @@ export default async function usersRoutes(fastify, options) {
                 updateData.password = await bcrypt.hash(password, 10);
             }
 
-            updateData.updated_at = new Date();
+            // Set Central Time timestamp
+            updateData.updated_at = getNowCentral();
 
             // Update user
             const updatedUser = await db.update(users)
@@ -395,11 +397,11 @@ export default async function usersRoutes(fastify, options) {
             // Hash new password
             const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-            // Update password
+            // Update password with Central Time timestamp
             await db.update(users)
                 .set({
                     password: hashedPassword,
-                    updated_at: new Date()
+                    updated_at: getNowCentral()
                 })
                 .where(eq(users.id, decoded.id));
 

@@ -112,6 +112,7 @@ export const leads = pgTable('leads', {
 
     // Plan Information
     plan_details: text('plan_details').notNull(),
+    quote_type: text('quote_type'),
 
     // Health Questionnaire
     hospitalized_nursing_oxygen_cancer_assistance: boolean('hospitalized_nursing_oxygen_cancer_assistance').notNull(),
