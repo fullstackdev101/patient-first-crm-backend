@@ -122,6 +122,18 @@ export default async function leadsRoutes(fastify, options) {
                 console.log('✅ License Agent filter applied: status = 8 (all License Agent leads)');
             }
 
+            // User ID 5 restriction - exclude approved and rejected leads
+            if (currentUser?.id === 5) {
+                // Exclude status 5 (Approved) and status 7 (Rejected)
+                const excludeApprovedCondition = sql`${leads.status} != 5`;
+                const excludeRejectedCondition = sql`${leads.status} != 7`;
+                conditions.push(excludeApprovedCondition);
+                conditions.push(excludeRejectedCondition);
+                countConditions.push(excludeApprovedCondition);
+                countConditions.push(excludeRejectedCondition);
+                console.log('✅ User ID 5 filter applied: excluding approved (5) and rejected (7) leads');
+            }
+
             // Apply status filter if provided (now using status ID)
             // Skip this for License Agents since they can only see status 8
             if (status && status !== 'All Statuses' && status !== 'All' && userRoleId !== 4) {
@@ -341,6 +353,14 @@ export default async function leadsRoutes(fastify, options) {
                 return reply.code(403).send({
                     success: false,
                     message: 'Access denied: You can only view leads you created'
+                });
+            }
+
+            // User ID 5 cannot view approved or rejected leads
+            if (currentUser?.id === 5 && (leadData.status === 5 || leadData.status === 7)) {
+                return reply.code(403).send({
+                    success: false,
+                    message: 'Access denied: You cannot view approved or rejected leads'
                 });
             }
 
