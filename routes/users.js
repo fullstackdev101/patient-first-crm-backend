@@ -59,6 +59,17 @@ export default async function usersRoutes(fastify, options) {
                 paramIndex++;
             }
 
+            // Filter by team_id if provided
+            if (request.query.team_id) {
+                if (whereClause) {
+                    whereClause += ` AND u.team_id = $${paramIndex}`;
+                } else {
+                    whereClause = `WHERE u.team_id = $${paramIndex}`;
+                }
+                params.push(parseInt(request.query.team_id));
+                paramIndex++;
+            }
+
             // Filter out users with excluded role
             if (exclude_role) {
                 if (whereClause) {
@@ -99,6 +110,7 @@ export default async function usersRoutes(fastify, options) {
                     u.status,
                     u.role_id,
                     TRIM(r.role) as role,
+                    u.team_id,
                     u.assigned_ip,
                     u.created_at,
                     u.updated_at
@@ -143,6 +155,7 @@ export default async function usersRoutes(fastify, options) {
                 email: users.email,
                 status: users.status,
                 role_id: users.role_id,
+                team_id: users.team_id,
                 assigned_ip: users.assigned_ip,
                 created_at: users.created_at,
                 updated_at: users.updated_at,
@@ -171,7 +184,7 @@ export default async function usersRoutes(fastify, options) {
     // Create new user
     fastify.post('/', async (request, reply) => {
         try {
-            const { name, username, email, password, status, role_id } = request.body;
+            const { name, username, email, password, status, role_id, team_id } = request.body;
 
             // Check if username or email already exists
             const existingUser = await db.select()
@@ -203,6 +216,7 @@ export default async function usersRoutes(fastify, options) {
                 password: hashedPassword,
                 status: status || 'Active',
                 role_id: role_id || 3,
+                team_id: team_id || null,
             }).returning({
                 id: users.id,
                 name: users.name,
@@ -210,6 +224,7 @@ export default async function usersRoutes(fastify, options) {
                 email: users.email,
                 status: users.status,
                 role_id: users.role_id,
+                team_id: users.team_id,
                 created_at: users.created_at,
                 updated_at: users.updated_at,
             });
@@ -232,7 +247,7 @@ export default async function usersRoutes(fastify, options) {
     fastify.put('/:id', async (request, reply) => {
         try {
             const { id } = request.params;
-            const { name, username, email, password, status, role_id } = request.body;
+            const { name, username, email, password, status, role_id, team_id } = request.body;
 
             // Check if user exists
             const existingUser = await db.select()
@@ -254,6 +269,7 @@ export default async function usersRoutes(fastify, options) {
             if (email !== undefined) updateData.email = email;
             if (status !== undefined) updateData.status = status;
             if (role_id !== undefined) updateData.role_id = role_id;
+            if (team_id !== undefined) updateData.team_id = team_id;
             if (request.body.assigned_ip !== undefined) updateData.assigned_ip = request.body.assigned_ip;
 
             // Hash password if provided

@@ -105,7 +105,10 @@ export default async function leadsRoutes(fastify, options) {
                 .leftJoin(roles, eq(users.role_id, roles.id))
                 .leftJoin(sql`users AS creator`, sql`${leads.created_by} = creator.id`); // Join for creator
 
-            let countQuery = db.select({ count: count() }).from(leads);
+            let countQuery = db.select({ count: count() })
+                .from(leads)
+                .leftJoin(users, eq(leads.assigned_to, users.id)); // Add users join for team_id filter
+
 
             // Role-based filtering
             if (userRoleId === 3 && currentUser?.id) {
@@ -171,6 +174,18 @@ export default async function leadsRoutes(fastify, options) {
                 conditions.push(assignedCondition);
                 countConditions.push(assignedCondition);
                 console.log('✅ Applying assigned_to filter:', request.query.assigned_to);
+            }
+
+            // Apply team_id filter if provided (filter by users in a specific team)
+            if (request.query.team_id && request.query.team_id !== 'All') {
+                const teamId = parseInt(request.query.team_id);
+                if (!isNaN(teamId)) {
+                    // Filter leads where assigned user belongs to the specified team
+                    const teamCondition = eq(users.team_id, teamId);
+                    conditions.push(teamCondition);
+                    countConditions.push(teamCondition);
+                    console.log('✅ Applying team_id filter:', teamId);
+                }
             }
 
             // Apply date filters if provided

@@ -10,6 +10,18 @@ export const roles = pgTable('roles', {
     created_by: integer('created_by'),
 });
 
+// Teams Table
+export const teams = pgTable('teams', {
+    id: serial('id').primaryKey(),
+    team_name: varchar('team_name', { length: 255 }).notNull().unique(),
+    description: text('description'),
+    status: varchar('status', { length: 20 }).notNull().default('active'),
+    sort_order: integer('sort_order').default(0),
+    created_by: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: timestamp('created_at').defaultNow(),
+    updated_at: timestamp('updated_at').defaultNow(),
+});
+
 // Leads Statuses Table (renamed from lead_status)
 export const leadsStatuses = pgTable('leads_statuses', {
     id: serial('id').primaryKey(),
@@ -75,6 +87,7 @@ export const users = pgTable('users', {
     password: varchar('password', { length: 255 }).notNull(),
     status: varchar('status', { length: 20 }).notNull().default('Active'),
     role_id: integer('role_id').references(() => roles.id),
+    team_id: integer('team_id').references(() => teams.id, { onDelete: 'set null' }),
     assigned_ip: varchar('assigned_ip', { length: 45 }),
     created_at: timestamp('created_at').defaultNow(),
     updated_at: timestamp('updated_at').defaultNow(),
