@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { leads, leadsStatusTracking, leadsAssignedTracking, leadsStatuses, users, roles } from '../db/schema.js';
+import { leads, leadsStatusTracking, leadsAssignedTracking, leadsStatuses, users, roles, teams } from '../db/schema.js';
 import { eq, like, or, and, desc, count, sql } from 'drizzle-orm';
 import { logActivity, ACTIVITY_TYPES } from '../utils/activityLogger.js';
 import { authenticateUser } from '../utils/authMiddleware.js';
@@ -17,7 +17,7 @@ export default async function leadsRoutes(fastify, options) {
             console.log('🔍 GET /leads - Query params:', {
                 status,
                 search,
-                assigned_to: request.query.assigned_to,
+                created_by: request.query.created_by,
                 start_date: request.query.start_date,
                 end_date: request.query.end_date,
                 page,
@@ -94,6 +94,8 @@ export default async function leadsRoutes(fastify, options) {
                 assigned_to: users.username, // Get agent name instead of ID
                 assigned_to_id: leads.assigned_to, // Keep ID for reference
                 assigned_to_role: sql`${roles.role}`.as('assigned_to_role'), // Get role from roles table
+                team_id: leads.team_id, // Team ID
+                team_name: sql`lead_team.team_name`.as('team_name'), // Team name
                 created_by_id: leads.created_by,
                 created_by_name: sql`creator.name`.as('created_by_name'), // Get creator name
                 created_at: leads.created_at,
@@ -103,7 +105,8 @@ export default async function leadsRoutes(fastify, options) {
                 .leftJoin(leadsStatuses, eq(leads.status, leadsStatuses.id))
                 .leftJoin(users, eq(leads.assigned_to, users.id))
                 .leftJoin(roles, eq(users.role_id, roles.id))
-                .leftJoin(sql`users AS creator`, sql`${leads.created_by} = creator.id`); // Join for creator
+                .leftJoin(sql`users AS creator`, sql`${leads.created_by} = creator.id`) // Join for creator
+                .leftJoin(sql`teams AS lead_team`, sql`${leads.team_id} = lead_team.id`); // Join for lead's team
 
             let countQuery = db.select({ count: count() })
                 .from(leads)
@@ -168,20 +171,20 @@ export default async function leadsRoutes(fastify, options) {
                 console.log('✅ Applying search filter:', search);
             }
 
-            // Apply assigned_to filter if provided
-            if (request.query.assigned_to && request.query.assigned_to !== 'All') {
-                const assignedCondition = eq(leads.assigned_to, parseInt(request.query.assigned_to));
-                conditions.push(assignedCondition);
-                countConditions.push(assignedCondition);
-                console.log('✅ Applying assigned_to filter:', request.query.assigned_to);
+            // Apply created_by filter if provided
+            if (request.query.created_by && request.query.created_by !== 'All') {
+                const createdByCondition = eq(leads.created_by, parseInt(request.query.created_by));
+                conditions.push(createdByCondition);
+                countConditions.push(createdByCondition);
+                console.log('✅ Applying created_by filter:', request.query.created_by);
             }
 
-            // Apply team_id filter if provided (filter by users in a specific team)
+            // Apply team_id filter if provided (filter by lead's team)
             if (request.query.team_id && request.query.team_id !== 'All') {
                 const teamId = parseInt(request.query.team_id);
                 if (!isNaN(teamId)) {
-                    // Filter leads where assigned user belongs to the specified team
-                    const teamCondition = eq(users.team_id, teamId);
+                    // Filter leads by their team_id (not the assigned user's team)
+                    const teamCondition = eq(leads.team_id, teamId);
                     conditions.push(teamCondition);
                     countConditions.push(teamCondition);
                     console.log('✅ Applying team_id filter:', teamId);
@@ -404,6 +407,20 @@ export default async function leadsRoutes(fastify, options) {
         try {
             const leadData = request.body;
 
+            // Get creator's team_id from their user record
+            let creatorTeamId = null;
+            if (request.user?.id) {
+                const creatorResult = await db.select({ team_id: users.team_id })
+                    .from(users)
+                    .where(eq(users.id, request.user.id))
+                    .limit(1);
+
+                if (creatorResult.length > 0) {
+                    creatorTeamId = creatorResult[0].team_id;
+                    console.log(`✅ Extracted team_id ${creatorTeamId} from creator user ${request.user.id}`);
+                }
+            }
+
             // Map directly - expecting snake_case from frontend
             const dbLead = {
                 first_name: leadData.first_name,
@@ -456,6 +473,7 @@ export default async function leadsRoutes(fastify, options) {
                 future_draft: leadData.future_draft || null,
                 status: leadData.status ? parseInt(leadData.status) : 6, // Default to 'New' (id: 6)
                 assigned_to: leadData.assigned_to ? parseInt(leadData.assigned_to) : null,
+                team_id: creatorTeamId, // Set team_id from creator's team
                 created_by: request.user?.id || null // Set created_by from authenticated user
             };
 

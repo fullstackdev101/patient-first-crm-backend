@@ -111,11 +111,13 @@ export default async function usersRoutes(fastify, options) {
                     u.role_id,
                     TRIM(r.role) as role,
                     u.team_id,
+                    t.team_name,
                     u.assigned_ip,
                     u.created_at,
                     u.updated_at
                 FROM users u
                 LEFT JOIN roles r ON u.role_id = r.id
+                LEFT JOIN teams t ON u.team_id = t.id
                 ${whereClause}
                 ORDER BY u.id
                 LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
@@ -136,6 +138,37 @@ export default async function usersRoutes(fastify, options) {
             };
         } catch (error) {
             console.error('Error fetching users:', error);
+            return reply.code(500).send({
+                success: false,
+                message: 'Failed to fetch users'
+            });
+        }
+    });
+
+    // Get all users without pagination (for dropdowns)
+    fastify.get('/all', async (request, reply) => {
+        try {
+            // Get all users with their roles
+            const query = `
+                SELECT 
+                    u.id,
+                    u.name,
+                    TRIM(r.role) as role,
+                    u.role_id
+                FROM users u
+                LEFT JOIN roles r ON u.role_id = r.id
+                WHERE u.status = 'Active'
+                ORDER BY u.name ASC
+            `;
+
+            const result = await pool.query(query);
+
+            return {
+                success: true,
+                data: result.rows
+            };
+        } catch (error) {
+            console.error('Error fetching all users:', error);
             return reply.code(500).send({
                 success: false,
                 message: 'Failed to fetch users'
@@ -186,6 +219,24 @@ export default async function usersRoutes(fastify, options) {
         try {
             const { name, username, email, password, status, role_id, team_id } = request.body;
 
+            // Get logged-in user's ID from JWT token
+            let createdByUserId = null;
+            const authHeader = request.headers.authorization;
+
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                try {
+                    const token = authHeader.substring(7);
+                    const { verifyToken } = await import('../utils/jwt.js');
+                    const decoded = verifyToken(token);
+
+                    if (decoded && decoded.id) {
+                        createdByUserId = decoded.id;
+                    }
+                } catch (error) {
+                    console.error('Error verifying token:', error);
+                }
+            }
+
             // Check if username or email already exists
             const existingUser = await db.select()
                 .from(users)
@@ -217,6 +268,7 @@ export default async function usersRoutes(fastify, options) {
                 status: status || 'Active',
                 role_id: role_id || 3,
                 team_id: team_id || null,
+                created_by: createdByUserId,
             }).returning({
                 id: users.id,
                 name: users.name,
@@ -225,6 +277,7 @@ export default async function usersRoutes(fastify, options) {
                 status: users.status,
                 role_id: users.role_id,
                 team_id: users.team_id,
+                created_by: users.created_by,
                 created_at: users.created_at,
                 updated_at: users.updated_at,
             });

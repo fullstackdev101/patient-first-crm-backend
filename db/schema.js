@@ -89,6 +89,7 @@ export const users = pgTable('users', {
     role_id: integer('role_id').references(() => roles.id),
     team_id: integer('team_id').references(() => teams.id, { onDelete: 'set null' }),
     assigned_ip: varchar('assigned_ip', { length: 45 }),
+    created_by: integer('created_by'),
     created_at: timestamp('created_at').defaultNow(),
     updated_at: timestamp('updated_at').defaultNow(),
 });
@@ -159,6 +160,7 @@ export const leads = pgTable('leads', {
     // Metadata
     status: integer('status').notNull().references(() => leadsStatuses.id),
     assigned_to: integer('assigned_to').references(() => users.id),
+    team_id: integer('team_id').references(() => teams.id, { onDelete: 'set null' }),
     created_by: integer('created_by').references(() => users.id),
     created_at: timestamp('created_at').defaultNow(),
     updated_at: timestamp('updated_at').defaultNow(),
