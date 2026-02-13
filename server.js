@@ -15,6 +15,7 @@ import statusTrackingRoutes from './routes/statusTracking.js';
 import dashboardRoutes from './routes/dashboard.js';
 import activitiesRoutes from './routes/activities.js';
 import ipAccessRoutes from './routes/ipAccess.js';
+import reportsRoutes from './routes/reports.js';
 
 // Import database
 import { testConnection } from './config/db.js';
@@ -53,6 +54,7 @@ await fastify.register(dashboardRoutes, { prefix: '/api/dashboard' });
 // Activities: Read-only (GET endpoints only, no creation)
 await fastify.register(activitiesRoutes, { prefix: '/api/activities' });
 await fastify.register(ipAccessRoutes, { prefix: '/api/ip-access' });
+await fastify.register(reportsRoutes, { prefix: '/api/reports' });
 
 // Health check route
 fastify.get('/health', async (request, reply) => {

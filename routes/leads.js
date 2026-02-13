@@ -134,6 +134,18 @@ export default async function leadsRoutes(fastify, options) {
                 console.log('✅ License Agent filter applied: status = 8 (all License Agent leads)');
             }
 
+            // QA Reviewer and QA Manager role-based status filter
+            if ((userRoleId === 5 || userRoleId === 6) && currentUser?.id) {
+                // QA roles (role_id: 5, 6) see only leads with status 1 (New) or 3 (QA Review)
+                const qaStatusCondition = or(
+                    eq(leads.status, 1), // New
+                    eq(leads.status, 3)  // QA Review
+                );
+                conditions.push(qaStatusCondition);
+                countConditions.push(qaStatusCondition);
+                console.log('✅ QA role filter applied: status = 1 (New) or 3 (QA Review)');
+            }
+
             // User ID 5 restriction - exclude approved and rejected leads
             if (currentUser?.id === 5) {
                 // Exclude status 5 (Approved) and status 7 (Rejected)
@@ -147,7 +159,8 @@ export default async function leadsRoutes(fastify, options) {
             }
 
             // Apply status filter if provided (now using status ID)
-            // Skip this for License Agents since they can only see status 8
+            // Skip this for License Agents (4) since they have hardcoded status filter (8)
+            // QA roles (5, 6) CAN use this filter to toggle between New (1) and QA Review (3)
             if (status && status !== 'All Statuses' && status !== 'All' && userRoleId !== 4) {
                 const statusId = parseInt(status);
                 if (!isNaN(statusId)) {
