@@ -159,7 +159,7 @@ export default async function leadsRoutes(fastify, options) {
       }
 
       // QA Reviewer and QA Manager role-based status filter
-      if ((userRoleId === 5) && currentUser?.id) {
+      if (userRoleId === 5 && currentUser?.id) {
         // QA roles (role_id: 5) see only leads with status 1 (New) or 3 (QA Review)
         const qaStatusCondition = or(
           eq(leads.status, 1), // New
@@ -218,14 +218,15 @@ export default async function leadsRoutes(fastify, options) {
       }
 
       // Apply created_by filter if provided
-      if (request.query.created_by && request.query.created_by !== "All") {
+      // if (request.query.created_by && request.query.created_by !== "All") {
+      if (userRoleId === 3 && currentUser?.id) {
         const createdByCondition = eq(
           leads.created_by,
-          parseInt(request.query.created_by),
+          parseInt(currentUser?.id),
         );
         conditions.push(createdByCondition);
         countConditions.push(createdByCondition);
-        console.log("✅ Applying created_by filter:", request.query.created_by);
+        console.log("✅ Applying created_by filter:", currentUser?.id);
       }
 
       // Apply team_id filter if provided (filter by lead's team)
@@ -296,14 +297,14 @@ export default async function leadsRoutes(fastify, options) {
       const allLeads = await query.orderBy(desc(leads.created_at));
 
       // Debug: Log first lead to verify role_id is included
-      if (allLeads.length > 0) {
-        console.log("Sample lead data:", {
-          id: allLeads[0].id,
-          assigned_to: allLeads[0].assigned_to,
-          assigned_to_id: allLeads[0].assigned_to_id,
-          assigned_to_role_id: allLeads[0].assigned_to_role_id,
-        });
-      }
+      // if (allLeads.length > 0) {
+      //   console.log("Sample lead data:", {
+      //     id: allLeads[0].id,
+      //     assigned_to: allLeads[0].assigned_to,
+      //     assigned_to_id: allLeads[0].assigned_to_id,
+      //     assigned_to_role_id: allLeads[0].assigned_to_role_id,
+      //   });
+      // }
 
       return {
         success: true,
@@ -518,7 +519,7 @@ export default async function leadsRoutes(fastify, options) {
         // If already boolean, use it; if string 'yes'/'no', convert; otherwise default to false
         hospitalized_nursing_oxygen_cancer_assistance:
           typeof leadData.hospitalized_nursing_oxygen_cancer_assistance ===
-            "boolean"
+          "boolean"
             ? leadData.hospitalized_nursing_oxygen_cancer_assistance
             : leadData.hospitalized_nursing_oxygen_cancer_assistance === "yes"
               ? true
@@ -712,7 +713,9 @@ export default async function leadsRoutes(fastify, options) {
       const oldStatus = existingLead[0].status;
 
       /*  DISABLED agent assingment. Removed frontend agent dropdown assignmentChanged  */
-      const assignmentChanged = 0;  // not assigning anymore
+      // const assignmentChanged = 0;  // not assigning anymore
+      delete updateData.assigned_to;
+
       // Check if assignment changed
       // const oldAssignedTo = existingLead[0].assigned_to;
       // const newAssignedTo = updateData.assigned_to;
@@ -758,15 +761,15 @@ export default async function leadsRoutes(fastify, options) {
 
       //////////////////////////////////////////
 
-      console.log('lead_manual_status: ' + updateData.lead_manual_status);
-      if (updateData.lead_manual_status === 'approved') {
+      console.log("lead_manual_status: " + updateData.lead_manual_status);
+      if (updateData.lead_manual_status === "approved") {
         if (request.user?.role_id === 5) {
-          updateData.status = 8;  // License Agent status id
+          updateData.status = 8; // License Agent status id
         } else {
-          updateData.status = 5;   // Approved status id          
+          updateData.status = 5; // Approved status id
         }
-      } else if (updateData.lead_manual_status === 'rejected') {
-        updateData.status = 7;  // Rejected status id
+      } else if (updateData.lead_manual_status === "rejected") {
+        updateData.status = 7; // Rejected status id
       }
 
       ////////////////////////////////////
@@ -805,29 +808,29 @@ export default async function leadsRoutes(fastify, options) {
       }
 
       // Track assignment change if assigned_to was updated
-      if (assignmentChanged && newAssignedTo) {
-        try {
-          const userId = request.user?.id || 1; // Use authenticated user ID
-          await db.insert(leadsAssignedTracking).values({
-            lead_id: parseInt(id),
-            assigned_by_user_id: userId,
-            assigned_to_user_id: parseInt(newAssignedTo),
-            old_assigned_to: oldAssignedTo ? parseInt(oldAssignedTo) : null,
-          });
-          console.log(
-            `✅ Assignment tracking logged: ${oldAssignedTo} -> ${newAssignedTo} by user ${userId}`,
-          );
-        } catch (trackingError) {
-          console.error("Error logging assignment tracking:", trackingError);
-          // Don't fail the update if tracking fails
-        }
-      }
+      // if (assignmentChanged && newAssignedTo) {
+      //   try {
+      //     const userId = request.user?.id || 1; // Use authenticated user ID
+      //     await db.insert(leadsAssignedTracking).values({
+      //       lead_id: parseInt(id),
+      //       assigned_by_user_id: userId,
+      //       assigned_to_user_id: parseInt(newAssignedTo),
+      //       old_assigned_to: oldAssignedTo ? parseInt(oldAssignedTo) : null,
+      //     });
+      //     console.log(
+      //       `✅ Assignment tracking logged: ${oldAssignedTo} -> ${newAssignedTo} by user ${userId}`,
+      //     );
+      //   } catch (trackingError) {
+      //     console.error("Error logging assignment tracking:", trackingError);
+      //     // Don't fail the update if tracking fails
+      //   }
+      // }
 
       // Log activity for lead update
       console.log("🔍 DEBUG: Checking activity logging...");
       console.log("🔍 Authenticated user from JWT:", request.user);
       console.log("🔍 statusChanged:", statusChanged);
-      console.log("🔍 assignmentChanged:", assignmentChanged);
+      // console.log("🔍 assignmentChanged:", assignmentChanged);
 
       // Get user_id from JWT token (authenticated user)
       const activityUserId = request.user?.id || 1;
@@ -846,14 +849,14 @@ export default async function leadsRoutes(fastify, options) {
       }
 
       // Log general update
-      await logActivity({
-        userId: activityUserId,
-        activityType: ACTIVITY_TYPES.LEAD_UPDATED,
-        description: `updated lead information for ${updatedLead[0].first_name} ${updatedLead[0].last_name}`,
-        entityType: "lead",
-        entityId: parseInt(id),
-      });
-      console.log("✅ Lead update activity logged");
+      // await logActivity({
+      //   userId: activityUserId,
+      //   activityType: ACTIVITY_TYPES.LEAD_UPDATED,
+      //   description: `updated lead information for ${updatedLead[0].first_name} ${updatedLead[0].last_name}`,
+      //   entityType: "lead",
+      //   entityId: parseInt(id),
+      // });
+      // console.log("✅ Lead update activity logged");
 
       // Log status change specifically
       if (statusChanged) {
@@ -868,16 +871,16 @@ export default async function leadsRoutes(fastify, options) {
       }
 
       // Log assignment change specifically
-      if (assignmentChanged) {
-        await logActivity({
-          userId: activityUserId,
-          activityType: ACTIVITY_TYPES.LEAD_ASSIGNED,
-          description: `assigned lead ${updatedLead[0].first_name} ${updatedLead[0].last_name} to agent`,
-          entityType: "lead",
-          entityId: parseInt(id),
-        });
-        console.log("✅ Assignment change activity logged");
-      }
+      // if (assignmentChanged) {
+      //   await logActivity({
+      //     userId: activityUserId,
+      //     activityType: ACTIVITY_TYPES.LEAD_ASSIGNED,
+      //     description: `assigned lead ${updatedLead[0].first_name} ${updatedLead[0].last_name} to agent`,
+      //     entityType: "lead",
+      //     entityId: parseInt(id),
+      //   });
+      //   console.log("✅ Assignment change activity logged");
+      // }
 
       return {
         success: true,
