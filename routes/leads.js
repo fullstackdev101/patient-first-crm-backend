@@ -519,7 +519,7 @@ export default async function leadsRoutes(fastify, options) {
         // If already boolean, use it; if string 'yes'/'no', convert; otherwise default to false
         hospitalized_nursing_oxygen_cancer_assistance:
           typeof leadData.hospitalized_nursing_oxygen_cancer_assistance ===
-          "boolean"
+            "boolean"
             ? leadData.hospitalized_nursing_oxygen_cancer_assistance
             : leadData.hospitalized_nursing_oxygen_cancer_assistance === "yes"
               ? true
@@ -762,6 +762,7 @@ export default async function leadsRoutes(fastify, options) {
       //////////////////////////////////////////
 
       console.log("lead_manual_status: " + updateData.lead_manual_status);
+      console.log("role_id: " + request.user?.role_id);
       if (updateData.lead_manual_status === "approved") {
         if (request.user?.role_id === 5) {
           updateData.status = 8; // License Agent status id
@@ -769,8 +770,13 @@ export default async function leadsRoutes(fastify, options) {
           updateData.status = 5; // Approved status id
         }
       } else if (updateData.lead_manual_status === "rejected") {
-        updateData.status = 7; // Rejected status id
+        if (request.user?.role_id === 5) {
+          updateData.status = 7; // Rejected status id
+        } else {
+          updateData.status = 9; // Rejected status id
+        }
       }
+      console.log("final status: " + updateData.status);
 
       ////////////////////////////////////
 
@@ -863,7 +869,9 @@ export default async function leadsRoutes(fastify, options) {
         await logActivity({
           userId: activityUserId,
           activityType: ACTIVITY_TYPES.LEAD_STATUS_CHANGED,
-          description: `changed status of lead ${updatedLead[0].first_name} ${updatedLead[0].last_name}`,
+          description: `changed status of lead ${updatedLead[0].first_name} ${updatedLead[0].last_name}  From: ${oldStatus} -> ${newStatus} by ${request.user}`,
+          // description: `changed status of lead ${updatedLead[0].first_name} ${updatedLead[0].last_name}`,
+          // description: `Status changed: ${oldStatus} -> ${newStatus} by user ${userId}`,
           entityType: "lead",
           entityId: parseInt(id),
         });
