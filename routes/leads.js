@@ -866,12 +866,30 @@ export default async function leadsRoutes(fastify, options) {
 
       // Log status change specifically
       if (statusChanged) {
+        // Resolve status names for human-readable activity log
+        const [oldStatusResult, newStatusResult] = await Promise.all([
+          oldStatus
+            ? db
+              .select({ status_name: leadsStatuses.status_name })
+              .from(leadsStatuses)
+              .where(eq(leadsStatuses.id, oldStatus))
+              .limit(1)
+            : Promise.resolve([]),
+          newStatus
+            ? db
+              .select({ status_name: leadsStatuses.status_name })
+              .from(leadsStatuses)
+              .where(eq(leadsStatuses.id, newStatus))
+              .limit(1)
+            : Promise.resolve([]),
+        ]);
+        const oldStatusName = oldStatusResult[0]?.status_name ?? oldStatus;
+        const newStatusName = newStatusResult[0]?.status_name ?? newStatus;
+
         await logActivity({
           userId: activityUserId,
           activityType: ACTIVITY_TYPES.LEAD_STATUS_CHANGED,
-          description: `changed status of lead ${updatedLead[0].first_name} ${updatedLead[0].last_name}  From: ${oldStatus} -> ${newStatus} by ${request.user}`,
-          // description: `changed status of lead ${updatedLead[0].first_name} ${updatedLead[0].last_name}`,
-          // description: `Status changed: ${oldStatus} -> ${newStatus} by user ${userId}`,
+          description: `Changed ${updatedLead[0].first_name} ${updatedLead[0].last_name} status (${oldStatusName} -> ${newStatusName})`,
           entityType: "lead",
           entityId: parseInt(id),
         });
