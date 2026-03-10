@@ -162,29 +162,38 @@ export default async function leadsRoutes(fastify, options) {
       if (userRoleId === 5 && currentUser?.id) {
         // QA roles (role_id: 5) see only leads with status 1 (New) or 3 (QA Review)
         const qaStatusCondition = or(
-          eq(leads.status, 1), // New
           eq(leads.status, 3), // QA Review
         );
         conditions.push(qaStatusCondition);
         countConditions.push(qaStatusCondition);
         console.log(
-          "✅ QA role filter applied: status = 1 (New) or 3 (QA Review)",
+          "✅ QA role filter applied: status = 3 (QA Review)",
+        );
+      } else if (userRoleId === 7 && currentUser?.id) {
+        // Validator (role_id: 7) see only leads with status 1 (New)
+        const qaStatusCondition = or(
+          eq(leads.status, 1), // New
+        );
+        conditions.push(qaStatusCondition);
+        countConditions.push(qaStatusCondition);
+        console.log(
+          "✅ Validator role filter applied: status = 1 (New)",
         );
       }
 
-      // User ID 5 restriction - exclude approved and rejected leads
-      if (currentUser?.id === 5) {
-        // Exclude status 5 (Approved) and status 7 (Rejected)
-        const excludeApprovedCondition = sql`${leads.status} != 5`;
-        const excludeRejectedCondition = sql`${leads.status} != 7`;
-        conditions.push(excludeApprovedCondition);
-        conditions.push(excludeRejectedCondition);
-        countConditions.push(excludeApprovedCondition);
-        countConditions.push(excludeRejectedCondition);
-        console.log(
-          "✅ User ID 5 filter applied: excluding approved (5) and rejected (7) leads",
-        );
-      }
+      // // User ID 5 restriction - exclude approved and rejected leads
+      // if (currentUser?.id === 5) {
+      //   // Exclude status 5 (Approved) and status 7 (Rejected)
+      //   const excludeApprovedCondition = sql`${leads.status} != 5`;
+      //   const excludeRejectedCondition = sql`${leads.status} != 7`;
+      //   conditions.push(excludeApprovedCondition);
+      //   conditions.push(excludeRejectedCondition);
+      //   countConditions.push(excludeApprovedCondition);
+      //   countConditions.push(excludeRejectedCondition);
+      //   console.log(
+      //     "✅ User ID 5 filter applied: excluding approved (5) and rejected (7) leads",
+      //   );
+      // }
 
       // Apply status filter if provided (now using status ID)
       // Skip this for License Agents (4) since they have hardcoded status filter (8)
@@ -294,7 +303,12 @@ export default async function leadsRoutes(fastify, options) {
       query = query.limit(normalizedLimit).offset(offset);
 
       // Order by most recent first
-      const allLeads = await query.orderBy(desc(leads.created_at));
+      const finalQuery = query.orderBy(desc(leads.created_at));
+      // 🛠️ Debug: Print the generated SQL query + bound params
+      // const { sql: sqlText, params: sqlParams } = finalQuery.toSQL();
+      // console.log("📋 LEADS LISTING SQL:", sqlText);
+      // console.log("📋 LEADS LISTING PARAMS:", sqlParams);
+      const allLeads = await finalQuery;
 
       // Debug: Log first lead to verify role_id is included
       // if (allLeads.length > 0) {
@@ -763,18 +777,23 @@ export default async function leadsRoutes(fastify, options) {
 
       console.log("lead_manual_status: " + updateData.lead_manual_status);
       console.log("role_id: " + request.user?.role_id);
+      // new requirement by Bilal A on 6th March 2026
+      // updateData.status = 8; // License Agent status id // Disabling license agent status update  as per 
+      // only Rejected status id 7 is allowed to update
       if (updateData.lead_manual_status === "approved") {
-        if (request.user?.role_id === 5) {
-          updateData.status = 8; // License Agent status id
+        if (request.user?.role_id === 7) {   // when Validator (id Role id: 7 ) approved
+          updateData.status = 3; // QA Reviews status id 3
         } else {
           updateData.status = 5; // Approved status id
         }
       } else if (updateData.lead_manual_status === "rejected") {
-        if (request.user?.role_id === 5) {
-          updateData.status = 7; // Rejected status id
-        } else {
-          updateData.status = 9; // Rejected status id
-        }
+        updateData.status = 7; // Rejected status id
+        // only Rejected status id 7 is allowed to update
+        // if (request.user?.role_id === 5) {
+        //   updateData.status = 7; // Rejected status id
+        // } else {
+        //   updateData.status = 9; // Rejected status id
+        // }
       }
       console.log("final status: " + updateData.status);
 
@@ -889,7 +908,7 @@ export default async function leadsRoutes(fastify, options) {
         await logActivity({
           userId: activityUserId,
           activityType: ACTIVITY_TYPES.LEAD_STATUS_CHANGED,
-          description: `Changed ${updatedLead[0].first_name} ${updatedLead[0].last_name} status (${oldStatusName} -> ${newStatusName})`,
+          description: `${updatedLead[0].first_name} ${updatedLead[0].last_name} status (${oldStatusName} -> ${newStatusName})`,
           entityType: "lead",
           entityId: parseInt(id),
         });
