@@ -69,10 +69,10 @@ export default async function dashboardRoutes(fastify, options) {
                 return query;
             };
 
-            const pendingCount = await buildStatusQuery(statusMap['Pending'] || 5);
-            const qaCount = await buildStatusQuery(statusMap['QA Review'] || 3);
-            const rejectedCount = await buildStatusQuery(statusMap['Rejected'] || 7);
-            const approvedCount = await buildStatusQuery(statusMap['Approved'] || 4);
+            const pendingCount = await buildStatusQuery(6);
+            const qaCount = await buildStatusQuery(3);
+            const rejectedCount = await buildStatusQuery(7);
+            const approvedCount = await buildStatusQuery(5);
 
             // Get monthly approved leads for the last 12 months
             const twelveMonthsAgo = new Date();

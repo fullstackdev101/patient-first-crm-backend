@@ -106,6 +106,10 @@ export const leads = pgTable('leads', {
     phone: varchar('phone', { length: 20 }).notNull(),
     email: varchar('email', { length: 255 }).notNull(),
     address: text('address').notNull(),
+    apt_lot: varchar('apt_lot', { length: 50 }),
+    city: varchar('city', { length: 50 }),
+    state: varchar('state', { length: 2 }),
+    zipcode: varchar('zipcode', { length: 10 }),
     state_of_birth: varchar('state_of_birth', { length: 50 }).notNull(),
     ssn: varchar('ssn', { length: 11 }).notNull(),
 

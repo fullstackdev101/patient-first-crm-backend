@@ -8,7 +8,7 @@ import {
   roles,
   teams,
 } from "../db/schema.js";
-import { eq, like, or, and, desc, count, sql } from "drizzle-orm";
+import { eq, like, or, and, desc, count, sql, inArray } from "drizzle-orm";
 import { logActivity, ACTIVITY_TYPES } from "../utils/activityLogger.js";
 import { authenticateUser } from "../utils/authMiddleware.js";
 import { getNowCentral } from "../utils/datetime.js";
@@ -20,6 +20,8 @@ export default async function leadsRoutes(fastify, options) {
   fastify.get("/", async (request, reply) => {
     try {
       const { status, search, page = 1, limit = 25 } = request.query;
+      // Comma-separated status IDs for multi-status filtering (e.g. "1,3")
+      const statusIdsParam = request.query.status_ids;
 
       // Validate and normalize limit to prevent excessively large requests
       const maxLimit = 500;
@@ -28,6 +30,7 @@ export default async function leadsRoutes(fastify, options) {
       // Debug: Log all query parameters
       console.log("🔍 GET /leads - Query params:", {
         status,
+        status_ids: statusIdsParam,
         search,
         created_by: request.query.created_by,
         start_date: request.query.start_date,
@@ -52,6 +55,10 @@ export default async function leadsRoutes(fastify, options) {
           phone: leads.phone,
           email: leads.email,
           address: leads.address,
+          apt_lot: leads.apt_lot,
+          city: leads.city,
+          state: leads.state,
+          zipcode: leads.zipcode,
           state_of_birth: leads.state_of_birth,
           ssn: leads.ssn,
 
@@ -148,38 +155,39 @@ export default async function leadsRoutes(fastify, options) {
       const countConditions = [];
 
       // License Agent role-based status filter (must be in conditions array to combine with other filters)
-      if (userRoleId === 4 && currentUser?.id) {
-        // License Agents (role_id: 4) see all leads with status 8 (License Agent), regardless of assignment
-        const licenseAgentStatusCondition = eq(leads.status, 8);
-        conditions.push(licenseAgentStatusCondition);
-        countConditions.push(licenseAgentStatusCondition);
-        console.log(
-          "✅ License Agent filter applied: status = 8 (all License Agent leads)",
-        );
-      }
+      // if (userRoleId === 4 && currentUser?.id) {
+      //   // License Agents (role_id: 4) see all leads with status 8 (License Agent), regardless of assignment
+      //   const licenseAgentStatusCondition = eq(leads.status, 8);
+      //   conditions.push(licenseAgentStatusCondition);
+      //   countConditions.push(licenseAgentStatusCondition);
+      //   console.log(
+      //     "✅ License Agent filter applied: status = 8 (all License Agent leads)",
+      //   );
+      // }
 
       // QA Reviewer and QA Manager role-based status filter
-      if (userRoleId === 5 && currentUser?.id) {
-        // QA roles (role_id: 5) see only leads with status 1 (New) or 3 (QA Review)
-        const qaStatusCondition = or(
-          eq(leads.status, 3), // QA Review
-        );
-        conditions.push(qaStatusCondition);
-        countConditions.push(qaStatusCondition);
-        console.log(
-          "✅ QA role filter applied: status = 3 (QA Review)",
-        );
-      } else if (userRoleId === 7 && currentUser?.id) {
-        // Validator (role_id: 7) see only leads with status 1 (New)
-        const qaStatusCondition = or(
-          eq(leads.status, 1), // New
-        );
-        conditions.push(qaStatusCondition);
-        countConditions.push(qaStatusCondition);
-        console.log(
-          "✅ Validator role filter applied: status = 1 (New)",
-        );
-      }
+      // if (userRoleId === 5 && currentUser?.id) {
+      //   // QA roles (role_id: 5) see only leads with status 1 (New) or 3 (QA Review)
+      //   const qaStatusCondition = or(
+      //     eq(leads.status, 1), // New Condition
+      //     eq(leads.status, 3), // QA Review
+      //   );
+      //   conditions.push(qaStatusCondition);
+      //   countConditions.push(qaStatusCondition);
+      //   console.log(
+      //     "✅ QA role filter applied: status = 3 (QA Review)",
+      //   );
+      // } else if (userRoleId === 7 && currentUser?.id) {
+      //   // Validator (role_id: 7) see only leads with status 1 (New)
+      //   const qaStatusCondition = or(
+      //     eq(leads.status, 10), // Validator
+      //   );
+      //   conditions.push(qaStatusCondition);
+      //   countConditions.push(qaStatusCondition);
+      //   console.log(
+      //     "✅ Validator role filter applied: status = 1 (New)",
+      //   );
+      // }
 
       // // User ID 5 restriction - exclude approved and rejected leads
       // if (currentUser?.id === 5) {
@@ -201,14 +209,28 @@ export default async function leadsRoutes(fastify, options) {
       if (
         status &&
         status !== "All Statuses" &&
-        status !== "All" &&
-        userRoleId !== 4
+        status !== "All"
       ) {
         const statusId = parseInt(status);
         if (!isNaN(statusId)) {
           conditions.push(eq(leads.status, statusId));
           countConditions.push(eq(leads.status, statusId));
           console.log("✅ Applying status filter with ID:", statusId);
+        }
+      }
+
+      // Multi-status filter: status_ids=1,3  (sidebar nav option with multiple statuses)
+      // Skipped for License Agents (4) who have a hardcoded role filter
+      if (statusIdsParam) {
+        const ids = statusIdsParam
+          .split(",")
+          .map((id) => parseInt(id.trim()))
+          .filter((id) => !isNaN(id));
+        if (ids.length > 0) {
+          const multiStatusCondition = inArray(leads.status, ids);
+          conditions.push(multiStatusCondition);
+          countConditions.push(multiStatusCondition);
+          console.log("✅ Applying multi-status filter with IDs:", ids);
         }
       }
 
@@ -367,6 +389,10 @@ export default async function leadsRoutes(fastify, options) {
           phone: leads.phone,
           email: leads.email,
           address: leads.address,
+          apt_lot: leads.apt_lot,
+          city: leads.city,
+          state: leads.state,
+          zipcode: leads.zipcode,
           state_of_birth: leads.state_of_birth,
           ssn: leads.ssn,
           height: leads.height,
@@ -428,26 +454,28 @@ export default async function leadsRoutes(fastify, options) {
         });
       }
 
-      // Fetch assigned user name separately if assigned_to exists
-      let assigned_user_name = null;
-      if (leadResult[0].assigned_to) {
-        const userResult = await db
+      // Fetch lead creator name separately if created_by exists
+      let lead_creator_name = null;
+
+      // Note: Ensure your leadResult[0] contains the creator's ID field (e.g., created_by)
+      if (leadResult[0].created_by) {
+        const creatorResult = await db
           .select({
             username: users.username,
           })
           .from(users)
-          .where(eq(users.id, leadResult[0].assigned_to))
+          .where(eq(users.id, leadResult[0].created_by))
           .limit(1);
 
-        if (userResult.length > 0) {
-          assigned_user_name = userResult[0].username;
+        if (creatorResult.length > 0) {
+          lead_creator_name = creatorResult[0].username;
         }
       }
 
-      // Add assigned_user_name to the result
+      // Add lead_creator_name to the result
       const leadData = {
         ...leadResult[0],
-        assigned_user_name,
+        lead_creator_name,
       };
 
       // Role-based access: Agents can only view leads they created
@@ -515,6 +543,10 @@ export default async function leadsRoutes(fastify, options) {
         phone: leadData.phone,
         email: leadData.email,
         address: leadData.address,
+        apt_lot: leadData.apt_lot || null,
+        city: leadData.city || null,
+        state: leadData.state || null,
+        zipcode: leadData.zipcode || null,
         state_of_birth: leadData.state_of_birth,
         ssn: leadData.ssn,
         height: leadData.height || null,
@@ -697,32 +729,6 @@ export default async function leadsRoutes(fastify, options) {
       const currentUser = request.user;
       const userRoleId = currentUser?.role_id;
 
-      if (userRoleId === 3) {
-        // Agents can only edit leads they created
-        if (existingLead[0].created_by !== currentUser?.id) {
-          return reply.code(403).send({
-            success: false,
-            message: "Access denied: You can only edit leads you created",
-          });
-        }
-
-        // Agents can only edit leads with "New" status (status_id = 6)
-        // Get the status name to check
-        const leadStatus = await db
-          .select({ status_name: leadsStatuses.status_name })
-          .from(leadsStatuses)
-          .where(eq(leadsStatuses.id, existingLead[0].status))
-          .limit(1);
-
-        if (leadStatus[0]?.status_name !== "New") {
-          return reply.code(403).send({
-            success: false,
-            message:
-              'Access denied: Agents can only edit leads with "New" status',
-          });
-        }
-      }
-
       // Store old status for tracking (check if changed AFTER auto-assignment)
       const oldStatus = existingLead[0].status;
 
@@ -781,8 +787,10 @@ export default async function leadsRoutes(fastify, options) {
       // updateData.status = 8; // License Agent status id // Disabling license agent status update  as per 
       // only Rejected status id 7 is allowed to update
       if (updateData.lead_manual_status === "approved") {
-        if (request.user?.role_id === 7) {   // when Validator (id Role id: 7 ) approved
-          updateData.status = 3; // QA Reviews status id 3
+        if (request.user?.role_id === 5) {   // when QA Reviewer (id Role id: 5 ) approved
+          updateData.status = 10; // SET Pending Validation status id 10
+        } else if (request.user?.role_id === 7) {   // when Validator (id Role id: 7 ) approved
+          updateData.status = 8; // LA  status id 4
         } else {
           updateData.status = 5; // Approved status id
         }
@@ -794,8 +802,14 @@ export default async function leadsRoutes(fastify, options) {
         // } else {
         //   updateData.status = 9; // Rejected status id
         // }
+      } else if (updateData.lead_manual_status === "dnc") {
+        updateData.status = 9; // DNC status id
+      } else if (updateData.lead_manual_status === "approved_level") {
+        updateData.status = 5; // approved_level status id
+      } else if (updateData.lead_manual_status === "approved_gi") {
+        updateData.status = 11; // approved_gi status id
       }
-      console.log("final status: " + updateData.status);
+      console.log("---------final status:--------" + updateData.status);
 
       ////////////////////////////////////
 
