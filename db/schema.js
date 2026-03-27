@@ -111,7 +111,8 @@ export const leads = pgTable('leads', {
     state: varchar('state', { length: 2 }),
     zipcode: varchar('zipcode', { length: 10 }),
     state_of_birth: varchar('state_of_birth', { length: 50 }).notNull(),
-    ssn: varchar('ssn', { length: 11 }).notNull(),
+    ssn: varchar('ssn', { length: 11 }),        // nullable — new leads use ssn_enc instead
+    ssn_enc: text('ssn_enc'),                    // AES-256-GCM encrypted SSN (base64 TEXT)
 
     // Medical Information
     height: varchar('height', { length: 20 }),
@@ -152,10 +153,14 @@ export const leads = pgTable('leads', {
     // Banking Information
     bank_name: varchar('bank_name', { length: 255 }).notNull(),
     account_name: varchar('account_name', { length: 255 }).notNull(),
-    account_number: varchar('account_number', { length: 100 }).notNull(),
-    routing_number: varchar('routing_number', { length: 100 }).notNull(),
+    account_number: varchar('account_number', { length: 100 }), // nullable — new leads use account_number_enc
+    routing_number: varchar('routing_number', { length: 100 }), // nullable — new leads use routing_number_enc
     account_type: varchar('account_type', { length: 50 }).notNull(),
     banking_comments: text('banking_comments'),
+
+    // Encrypted sensitive banking fields (AES-256-GCM, stored as base64 TEXT)
+    account_number_enc: text('account_number_enc'),
+    routing_number_enc: text('routing_number_enc'),
 
     // Draft Fields
     initial_draft: text('initial_draft'),

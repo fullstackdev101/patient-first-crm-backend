@@ -12,6 +12,7 @@ import { eq, like, or, and, desc, count, sql, inArray } from "drizzle-orm";
 import { logActivity, ACTIVITY_TYPES } from "../utils/activityLogger.js";
 import { authenticateUser } from "../utils/authMiddleware.js";
 import { getNowCentral } from "../utils/datetime.js";
+import { encrypt, decrypt } from "../utils/encrypt.js";
 
 export default async function leadsRoutes(fastify, options) {
   // Add authentication middleware to all routes
@@ -395,6 +396,7 @@ export default async function leadsRoutes(fastify, options) {
           zipcode: leads.zipcode,
           state_of_birth: leads.state_of_birth,
           ssn: leads.ssn,
+          ssn_enc: leads.ssn_enc,
           height: leads.height,
           weight: leads.weight,
           insurance_provider: leads.insurance_provider,
@@ -409,7 +411,9 @@ export default async function leadsRoutes(fastify, options) {
           bank_name: leads.bank_name,
           account_name: leads.account_name,
           account_number: leads.account_number,
+          account_number_enc: leads.account_number_enc,
           routing_number: leads.routing_number,
+          routing_number_enc: leads.routing_number_enc,
           account_type: leads.account_type,
           banking_comments: leads.banking_comments,
           // Draft Fields
@@ -476,6 +480,16 @@ export default async function leadsRoutes(fastify, options) {
       const leadData = {
         ...leadResult[0],
         lead_creator_name,
+        // Decrypt sensitive fields — prefer encrypted column, fall back to plain
+        ssn: leadResult[0].ssn_enc
+          ? decrypt(leadResult[0].ssn_enc)
+          : leadResult[0].ssn || null,
+        account_number: leadResult[0].account_number_enc
+          ? decrypt(leadResult[0].account_number_enc)
+          : leadResult[0].account_number || null,
+        routing_number: leadResult[0].routing_number_enc
+          ? decrypt(leadResult[0].routing_number_enc)
+          : leadResult[0].routing_number || null,
       };
 
       // Role-based access: Agents can only view leads they created
@@ -548,7 +562,8 @@ export default async function leadsRoutes(fastify, options) {
         state: leadData.state || null,
         zipcode: leadData.zipcode || null,
         state_of_birth: leadData.state_of_birth,
-        ssn: leadData.ssn,
+        ssn: null,                      // not stored in plain anymore for new leads
+        ssn_enc: encrypt(leadData.ssn), // AES-256-GCM encrypted
         height: leadData.height || null,
         weight: leadData.weight || null,
         insurance_provider: leadData.insurance_provider || null,
@@ -652,8 +667,10 @@ export default async function leadsRoutes(fastify, options) {
 
         bank_name: leadData.bank_name,
         account_name: leadData.account_name,
-        account_number: leadData.account_number,
-        routing_number: leadData.routing_number,
+        account_number: null,       // not stored in plain anymore for new leads
+        routing_number: null,       // not stored in plain anymore for new leads
+        account_number_enc: encrypt(leadData.account_number),
+        routing_number_enc: encrypt(leadData.routing_number),
         account_type: leadData.account_type,
         banking_comments: leadData.banking_comments || null,
         // Draft Fields
@@ -821,6 +838,20 @@ export default async function leadsRoutes(fastify, options) {
       // Update lead with Central Time timestamp
       updateData.updated_at = getNowCentral();
 
+      // --- Encrypt sensitive fields on update ---
+      if (updateData.ssn !== undefined) {
+        updateData.ssn_enc = encrypt(updateData.ssn);
+        updateData.ssn = null; // clear plain column for updated records
+      }
+      if (updateData.account_number !== undefined) {
+        updateData.account_number_enc = encrypt(updateData.account_number);
+        updateData.account_number = null;
+      }
+      if (updateData.routing_number !== undefined) {
+        updateData.routing_number_enc = encrypt(updateData.routing_number);
+        updateData.routing_number = null;
+      }
+
       const updatedLead = await db
         .update(leads)
         .set(updateData)
@@ -944,7 +975,18 @@ export default async function leadsRoutes(fastify, options) {
       return {
         success: true,
         message: "Lead updated successfully",
-        data: updatedLead[0],
+        data: {
+          ...updatedLead[0],
+          ssn: updatedLead[0].ssn_enc
+            ? decrypt(updatedLead[0].ssn_enc)
+            : updatedLead[0].ssn || null,
+          account_number: updatedLead[0].account_number_enc
+            ? decrypt(updatedLead[0].account_number_enc)
+            : updatedLead[0].account_number || null,
+          routing_number: updatedLead[0].routing_number_enc
+            ? decrypt(updatedLead[0].routing_number_enc)
+            : updatedLead[0].routing_number || null,
+        },
       };
     } catch (error) {
       console.error("Error updating lead:", error);
